@@ -1,4 +1,3 @@
-# app.py
 import os
 import uuid
 import requests
@@ -14,9 +13,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Generate API key
-API_KEY = str(uuid.uuid4())
-print(f"Your generated API Key: {API_KEY}")
+# Fixed API key
+API_KEY = "74303dce-713f-4b91-829e-7e0a6c76a25c"
 
 # Models directory
 MODELS_DIR = "models"
@@ -24,8 +22,8 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 
 # Model files and their download URLs
 MODEL_FILES = {
-    "opencv_face_detector.pbtxt": "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/opencv_face_detector.pbtxt",
-    "opencv_face_detector_uint8.pb": "https://github.com/opencv/opencv/raw/master/samples/dnn/face_detector/opencv_face_detector_uint8.pb",
+    "opencv_face_detector.pbtxt": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector.pbtxt",
+    "opencv_face_detector_uint8.pb": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector_uint8.pb",
     "age_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/age_deploy.prototxt",
     "age_net.caffemodel": "https://www.dropbox.com/s/xfb20y596869vbb/age_net.caffemodel?dl=1",
     "gender_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/gender_deploy.prototxt",
