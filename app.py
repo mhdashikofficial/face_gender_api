@@ -1,63 +1,82 @@
 import os
-import uuid
 import requests
 import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Query
 from typing import Optional
 from starlette.responses import JSONResponse
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Models directory
+    MODELS_DIR = "models"
+    os.makedirs(MODELS_DIR, exist_ok=True)
+
+    # Model files and their download URLs
+    MODEL_FILES = {
+        "opencv_face_detector.pbtxt": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector.pbtxt",
+        "opencv_face_detector_uint8.pb": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector_uint8.pb",
+        "age_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/age_deploy.prototxt",
+        "age_net.caffemodel": "https://www.dropbox.com/s/xfb20y596869vbb/age_net.caffemodel?dl=1",
+        "gender_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/gender_deploy.prototxt",
+        "gender_net.caffemodel": "https://www.dropbox.com/s/iyv483wz7ztr9gh/gender_net.caffemodel?dl=1"
+    }
+
+    # Download models if not present
+    for filename, url in MODEL_FILES.items():
+        path = os.path.join(MODELS_DIR, filename)
+        if not os.path.exists(path):
+            print(f"Downloading {filename} from {url}")
+            try:
+                response = requests.get(url, timeout=120)  # Increased timeout for large files
+                response.raise_for_status()
+                with open(path, 'wb') as f:
+                    f.write(response.content)
+                print(f"Downloaded {filename} successfully")
+            except Exception as e:
+                print(f"Error downloading {filename}: {str(e)}")
+                # Continue to try loading, but it may fail later
+
+    # Define model paths after potential download
+    face_proto = os.path.join(MODELS_DIR, "opencv_face_detector.pbtxt")
+    face_model = os.path.join(MODELS_DIR, "opencv_face_detector_uint8.pb")
+    age_proto = os.path.join(MODELS_DIR, "age_deploy.prototxt")
+    age_model = os.path.join(MODELS_DIR, "age_net.caffemodel")
+    gender_proto = os.path.join(MODELS_DIR, "gender_deploy.prototxt")
+    gender_model = os.path.join(MODELS_DIR, "gender_net.caffemodel")
+
+    # Load models
+    try:
+        global face_net, age_net, gender_net
+        face_net = cv2.dnn.readNetFromTensorflow(face_model, face_proto)
+        age_net = cv2.dnn.readNetFromCaffe(age_proto, age_model)
+        gender_net = cv2.dnn.readNetFromCaffe(gender_proto, gender_model)
+        print("Models loaded successfully")
+    except Exception as e:
+        print(f"Error loading models: {str(e)}")
+        # The app will start, but /predict will fail if models are not loaded
+
+    yield
 
 app = FastAPI(
     title="Age and Gender Prediction API",
     description="An API to predict age and gender from images using OpenCV. Supports file uploads and image URLs (including Cloudinary).",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Fixed API key
 API_KEY = "74303dce-713f-4b91-829e-7e0a6c76a25c"
 
-# Models directory
-MODELS_DIR = "models"
-os.makedirs(MODELS_DIR, exist_ok=True)
-
-# Model files and their download URLs
-MODEL_FILES = {
-    "opencv_face_detector.pbtxt": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector.pbtxt",
-    "opencv_face_detector_uint8.pb": "https://raw.githubusercontent.com/spmallick/learnopencv/master/AgeGender/opencv_face_detector_uint8.pb",
-    "age_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/age_deploy.prototxt",
-    "age_net.caffemodel": "https://www.dropbox.com/s/xfb20y596869vbb/age_net.caffemodel?dl=1",
-    "gender_deploy.prototxt": "https://raw.githubusercontent.com/smahesh29/Gender-and-Age-Detection/master/gender_deploy.prototxt",
-    "gender_net.caffemodel": "https://www.dropbox.com/s/iyv483wz7ztr9gh/gender_net.caffemodel?dl=1"
-}
-
-# Download models if not present
-def download_model(url, path):
-    if not os.path.exists(path):
-        print(f"Downloading {path} from {url}")
-        response = requests.get(url)
-        response.raise_for_status()
-        with open(path, 'wb') as f:
-            f.write(response.content)
-
-for filename, url in MODEL_FILES.items():
-    download_model(url, os.path.join(MODELS_DIR, filename))
-
-# Load models
-face_proto = os.path.join(MODELS_DIR, "opencv_face_detector.pbtxt")
-face_model = os.path.join(MODELS_DIR, "opencv_face_detector_uint8.pb")
-age_proto = os.path.join(MODELS_DIR, "age_deploy.prototxt")
-age_model = os.path.join(MODELS_DIR, "age_net.caffemodel")
-gender_proto = os.path.join(MODELS_DIR, "gender_deploy.prototxt")
-gender_model = os.path.join(MODELS_DIR, "gender_net.caffemodel")
-
-face_net = cv2.dnn.readNetFromTensorflow(face_model, face_proto)
-age_net = cv2.dnn.readNetFromCaffe(age_proto, age_model)
-gender_net = cv2.dnn.readNetFromCaffe(gender_proto, gender_model)
-
 # Constants
 MODEL_MEAN_VALUES = (78.4263377603, 87.7689143744, 114.895847746)
 age_list = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 gender_list = ['Male', 'Female']
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.post("/predict")
 async def predict(
@@ -76,7 +95,7 @@ async def predict(
     if image_url:
         # Download image from URL
         try:
-            response = requests.get(image_url)
+            response = requests.get(image_url, timeout=30)
             response.raise_for_status()
             contents = response.content
         except Exception as e:
@@ -90,6 +109,10 @@ async def predict(
 
     if img is None:
         raise HTTPException(status_code=400, detail="Invalid image")
+
+    # Check if models are loaded
+    if 'face_net' not in globals() or 'age_net' not in globals() or 'gender_net' not in globals():
+        raise HTTPException(status_code=500, detail="Models not loaded properly")
 
     # Detect faces
     h, w = img.shape[:2]
